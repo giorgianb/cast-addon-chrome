@@ -29,12 +29,11 @@ var awaitingSetVolumeResponse = false;
 var settingVolume = false;
 
 document.addEventListener("DOMContentLoaded", () => {
-  browser.storage.local.get("interface").then((storedData) => {
-    if (storedData.interface == "legacy") {
-      document.getElementById("interface").style.display = "none";
-      document.getElementById("interfaceLegacy").style.display = "block";
-    }
-  });
+  const bInterface = localStorage.getItem("interface");
+  if (bInterface == "legacy") {
+    document.getElementById("interface").style.display = "none";
+    document.getElementById("interfaceLegacy").style.display = "block";
+  }
 
   restoreIPAddress();
   setTogglePlaybackIcon();
@@ -78,118 +77,114 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("alertMessageDiv").addEventListener("click", () => {
     document.getElementById("alertMessageDiv").style.display = "none";
   });
-
 });
 
 function cast() {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress === "") {
-      alertUser("Please enter the cast IP address.");
-      return;
-    }
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (ipAddress === "") {
+    alertUser("Please enter the cast IP address.");
+    return;
+  }
 
-    let currentTab = browser.tabs.query({
-      active: true,
-      windowId: browser.windows.WINDOW_ID_CURRENT
-    }).then((tabInfo) => {
-      let tabURL = escape(tabInfo[0].url);
-      let request = new XMLHttpRequest();
+  let currentTab = chrome.tabs.query({
+    active: true,
+    currentWindow: true
+  }, (tabInfo) => {
+    let tabURL = escape(tabInfo[0].url);
+    let request = new XMLHttpRequest();
 
-      request.onreadystatechange = () => {
-        if (request.readyState === XMLHttpRequest.DONE) {
-          const response = (request.responseText) ? JSON.parse(request.responseText) : null;
-          switch (request.status) {
-            case 0:
-              alertUser("Unable to reach cast server.");
-              break;
-            case 200:
-              if ("version" in response && response.version >= CAST_SERVER_RANGE_SUPPORT_VERSION) {
-                browser.storage.local.set({ "interface" : "new", "duration": response.duration });
-                showNewInterface();
-                setTogglePlaybackIcon();
-                setVolumeBar();
-                setVolumeIcon();
-              } else {
-                browser.storage.local.set({ "interface" : "legacy" });
-                showLegacyInterface();
-                setTogglePauseIconLegacy();
-              }
-              break;
-            case 400:
-              switch (response && response.status) {
-                case INVALID_PARAMETERS:
-                  alertUser("Congrats, you found a bug!");
-                  break;
-                case EXPIRED_CAST:
-                  alertUser("Someone else cast a video.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            case 500:
-              switch (response && response.status) {
-                case UNKNOWN:
-                  alertUser("Error casting video.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            default:
-              alertUser("Unknown error. Sorry!");
-              break;
-          }
+    request.onreadystatechange = () => {
+      if (request.readyState === XMLHttpRequest.DONE) {
+        const response = (request.responseText) ? JSON.parse(request.responseText) : null;
+        switch (request.status) {
+          case 0:
+            alertUser("Unable to reach cast server.");
+            break;
+          case 200:
+            if ("version" in response && response.version >= CAST_SERVER_RANGE_SUPPORT_VERSION) {
+              localStorage.setItem("interface", "new");
+              localStorage.setItem("duration", response.duration);
+              showNewInterface();
+              setTogglePlaybackIcon();
+              setVolumeBar();
+              setVolumeIcon();
+            } else {
+              localStorage.set("interface", "legacy");
+              showLegacyInterface();
+              setTogglePauseIconLegacy();
+            }
+            break;
+          case 400:
+            switch (response && response.status) {
+              case INVALID_PARAMETERS:
+                alertUser("Congrats, you found a bug!");
+                break;
+              case EXPIRED_CAST:
+                alertUser("Someone else cast a video.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          case 500:
+            switch (response && response.status) {
+              case UNKNOWN:
+                alertUser("Error casting video.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          default:
+            alertUser("Unknown error. Sorry!");
+            break;
         }
-      };
-
-      /* TODO: Update to use POST in future version */
-      request.open("GET",
-        "http://" + ipAddress + ":" + COMMAND_PORT + "/cast?video=" + tabURL,
-        true
-      );
-      request.send();
-
-    });
-
-    /* Attempt to connect to new update port */
-    const connection = new WebSocket("ws://" + ipAddress + ":" + UPDATE_PORT);
-    connection.onopen = () => {
-      browser.storage.local.set({ "interface" : "new" });
-      showNewInterface();
+      }
     };
 
-    connection.onmessage = handleMessage;
+    /* TODO: Update to use POST in future version */
+    request.open("GET",
+      "http://" + ipAddress + ":" + COMMAND_PORT + "/cast?video=" + tabURL,
+      true
+    );
+    request.send();
 
-    /* If unsuccessful, connect to old update port */
-    connection.onclose = (e) => {
-      if (e.code === 1006) {
-        const connectionLegacy = new WebSocket("ws://" + ipAddress + ":" + LEGACY_UPDATE_PORT);
-        connectionLegacy.onopen = () => {
-          browser.storage.local.set({ "interface" : "legacy" });
-          showLegacyInterface();
-        };
-
-        connectionLegacy.onmessage = handleMessageLegacy;
-      }
-    }
   });
+
+  /* Attempt to connect to new update port */
+  const connection = new WebSocket("ws://" + ipAddress + ":" + UPDATE_PORT);
+  connection.onopen = () => {
+    localStorage.setItem("interface", "new");
+    showNewInterface();
+  };
+
+  connection.onmessage = handleMessage;
+
+  /* If unsuccessful, connect to old update port */
+  connection.onclose = (e) => {
+    if (e.code === 1006) {
+      const connectionLegacy = new WebSocket("ws://" + ipAddress + ":" + LEGACY_UPDATE_PORT);
+      connectionLegacy.onopen = () => {
+        localStorage.setItem("interface", "legacy");
+        showLegacyInterface();
+      };
+
+      connectionLegacy.onmessage = handleMessageLegacy;
+    }
+  }
 }
 
 function setTogglePlaybackIcon() {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress)
-      sendSimpleCommand("getPlaybackStatus", (request) => {
-        if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
-          const playing = (request.responseText && JSON.parse(request.responseText).playbackStatus) === "Playing";
-          document.getElementById("togglePlaybackStatus").src = (playing) ? PAUSE_ICON_PATH : PLAY_ICON_PATH;
-        }
-      });
-  });
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (ipAddress)
+    sendSimpleCommand("getPlaybackStatus", (request) => {
+      if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
+        const playing = (request.responseText && JSON.parse(request.responseText).playbackStatus) === "Playing";
+        document.getElementById("togglePlaybackStatus").src = (playing) ? PAUSE_ICON_PATH : PLAY_ICON_PATH;
+      }
+    });
 }
 
 function togglePlaybackStatus() {
@@ -242,70 +237,71 @@ function togglePlaybackStatus() {
 }
 
 function setScrubberBar() {
-  browser.storage.local.get(["ipAddress", "duration", "position"]).then((storedData) => {
-    const scrubberBar = document.getElementById("scrubberBar");
-    const min = parseInt(scrubberBar.min, 10);
-    const max = parseInt(scrubberBar.max, 10);
+  const ipAddress = localStorage.getItem("ipAddress");
+  const duration = localStorage.getItem("duration");
+  const position = localStorage.getItem("position");
 
-    const duration = storedData.duration;
-    const position = storedData.position;
-    if (duration && position)
-      scrubberBar.value = Math.floor(position / duration * (max - min)) + min;
+  const scrubberBar = document.getElementById("scrubberBar");
+  const min = parseInt(scrubberBar.min, 10);
+  const max = parseInt(scrubberBar.max, 10);
 
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress)
-      sendSimpleCommand("getDuration", (request) => {
-        if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
-          const duration = JSON.parse(request.responseText).duration;
+  if (duration && position)
+    scrubberBar.value = Math.floor(position / duration * (max - min)) + min;
 
-          browser.storage.local.set({ duration: duration });
-          sendSimpleCommand("getPosition", (request) => {
-            if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
-              const position = JSON.parse(request.responseText).position;
-              const status = JSON.parse(request.responseText).status;
-              if (!settingPosition && !awaitingSetPositionResponse) {
-                browser.storage.local.set({ position: position });
-                scrubberBar.value = Math.floor(position / duration * (max - min)) + min;
-              }
-            }
-          });
-        } else if (!settingPosition && !awaitingSetPositionResponse) {
-          scrubberBar.value = 0;
-          browser.storage.local.set({ position: 0 });
-        }
-      });
-  });
-}
+  if (ipAddress)
+    sendSimpleCommand("getDuration", (request) => {
+      if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
+        const duration = JSON.parse(request.responseText).duration;
 
-function setVolumeBar() {
-  if (!settingVolume && !awaitingSetVolumeResponse)
-    browser.storage.local.get(["ipAddress", "maxVolume", "minVolume", "volume"]).then((storedData) => {
-      const volumeBar = document.getElementById("volumeBar");
-      const min = parseInt(volumeBar.min, 10);
-      const max = parseInt(volumeBar.max, 10);
-
-      const maxVolume = parseFloat(storedData.maxVolume, 10) || 500;
-      const minVolume = parseFloat(storedData.minVolume, 10) || -4000;
-      const volume = storedData.volume;
-      if (volume) {
-        const mb = 2000 * Math.log10(volume);
-        volumeBar.value = (mb >= 0) ? mb / maxVolume * max : mb / minVolume * min;
-      }
-
-      const ipAddress = storedData.ipAddress;
-      if (ipAddress)
-        sendSimpleCommand("getVolume", (request) => {
-          if (request.readyState === XMLHttpRequest.DONE && request.status == 200) {
-            const volume = JSON.parse(request.responseText).volume;
-
-            if (!settingVolume && !awaitingSetVolumeResponse) {
-              const mb = 2000 * Math.log10(volume);
-              browser.storage.local.set({ volume: volume });
-              volumeBar.value = (mb >= 0) ? mb / maxVolume * max : mb / minVolume * min;
+        localStorage.setItem("duration", duration);
+        sendSimpleCommand("getPosition", (request) => {
+          if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
+            const position = JSON.parse(request.responseText).position;
+            const status = JSON.parse(request.responseText).status;
+            if (!settingPosition && !awaitingSetPositionResponse) {
+              localStorage.setItem("position", position);
+              scrubberBar.value = Math.floor(position / duration * (max - min)) + min;
             }
           }
         });
+      } else if (!settingPosition && !awaitingSetPositionResponse) {
+        scrubberBar.value = 0;
+        localStorage.setItem("position", 0);
+      }
     });
+}
+
+function setVolumeBar() {
+  if (!settingVolume && !awaitingSetVolumeResponse) {
+    const ipAddress = localStorage.getItem("ipAddress");
+    const storedMaxVolume = localStorage.getItem("maxVolume");
+    const storedMinVolume = localStorage.getItem("minVolume");
+    const volume = localStorage.getItem("volume");
+
+    const volumeBar = document.getElementById("volumeBar");
+    const min = parseInt(volumeBar.min, 10);
+    const max = parseInt(volumeBar.max, 10);
+
+    const maxVolume = parseFloat(storedMaxVolume, 10) || 500;
+    const minVolume = parseFloat(storedMinVolume, 10) || -4000;
+    if (volume) {
+      const mb = 2000 * Math.log10(volume);
+      volumeBar.value = (mb >= 0) ? mb / maxVolume * max : mb / minVolume * min;
+    }
+
+    if (ipAddress)
+      sendSimpleCommand("getVolume", (request) => {
+        if (request.readyState === XMLHttpRequest.DONE && request.status == 200) {
+          const volume = JSON.parse(request.responseText).volume;
+
+          if (!settingVolume && !awaitingSetVolumeResponse) {
+            const mb = 2000 * Math.log10(volume);
+            localStorage.setItem("volume", volume);
+            volumeBar.value = (mb >= 0) ? mb / maxVolume * max : mb / minVolume * min;
+          }
+        }
+      });
+  }
 }
 
 function setVolumeIcon() {
@@ -323,322 +319,311 @@ function setVolumeIcon() {
 }
 
 function setPosition() {
-  browser.storage.local.get(["ipAddress", "duration"]).then((storedData) => {
-    const duration = storedData.duration;
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress && duration) {
-      const scrubberBar = document.getElementById("scrubberBar");
-      const min = parseInt(scrubberBar.min, 10);
-      const max = parseInt(scrubberBar.max, 10);
-      const value = parseInt(scrubberBar.value, 10);
+  const ipAddress = localStorage.getItem("ipAddress");
+  const duration = localStorage.getItem("duration");
 
-      const position = Math.floor(value/(max - min) * duration);
-      browser.storage.local.set({ position: position });
+  if (ipAddress && duration) {
+    const scrubberBar = document.getElementById("scrubberBar");
+    const min = parseInt(scrubberBar.min, 10);
+    const max = parseInt(scrubberBar.max, 10);
+    const value = parseInt(scrubberBar.value, 10);
 
-      /* TODO: add checking for errors such as EXPIRED_CAST, etc
-       * Also prevent getPosition from changing input bar until response received
-       */
-      let request = new XMLHttpRequest();
-      awaitingSetPositionResponse = true;
-      request.onreadystatechange = () => {
-        if (request.readyState == XMLHttpRequest.DONE) {
-          awaitingSetPositionResponse = false; 
+    const position = Math.floor(value/(max - min) * duration);
+    localStorage.setItem("position", position);
 
-          const response = (request.responseText) ? JSON.parse(request.responseText) : null;
-          switch (request.status) {
-            case 0:
-              alertUser("Unable to reach cast server.");
-              break;
-            case 200:
-              /* do nothing */
-              break;
-            case 400:
-              switch (response && response.status) {
-                case NEW_CASTER:
-                  alertUser("Someone else cast a video.");
-                  break;
-                case EXPIRED_CAST:
-                  alertUser("Cast expired.");
-                  break;
-                case NO_CAST:
-                  alertUser("No video is being cast.");
-                  break;
-                case CAST_LOADING:
-                  alertUser("Video loading.");
-                  break;
-                case INVALID_PARAMETERS:
-                  alertUser("Congrats, you found a bug!");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            case 500:
-              switch (response && response.status) {
-                case UNKNOWN:
-                  alertUser("Error setting position.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            default:
-              alertUser("Unknown error. Sorry!");
-              break;
-          }
+    /* TODO: add checking for errors such as EXPIRED_CAST, etc
+     * Also prevent getPosition from changing input bar until response received
+     */
+    let request = new XMLHttpRequest();
+    awaitingSetPositionResponse = true;
+    request.onreadystatechange = () => {
+      if (request.readyState == XMLHttpRequest.DONE) {
+        awaitingSetPositionResponse = false; 
+
+        const response = (request.responseText) ? JSON.parse(request.responseText) : null;
+        switch (request.status) {
+          case 0:
+            alertUser("Unable to reach cast server.");
+            break;
+          case 200:
+            /* do nothing */
+            break;
+          case 400:
+            switch (response && response.status) {
+              case NEW_CASTER:
+                alertUser("Someone else cast a video.");
+                break;
+              case EXPIRED_CAST:
+                alertUser("Cast expired.");
+                break;
+              case NO_CAST:
+                alertUser("No video is being cast.");
+                break;
+              case CAST_LOADING:
+                alertUser("Video loading.");
+                break;
+              case INVALID_PARAMETERS:
+                alertUser("Congrats, you found a bug!");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          case 500:
+            switch (response && response.status) {
+              case UNKNOWN:
+                alertUser("Error setting position.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          default:
+            alertUser("Unknown error. Sorry!");
+            break;
         }
       }
-
-      request.open("POST",
-        "http://" + ipAddress + ":" + COMMAND_PORT + "/setPosition?position=" + position,
-        true
-      );
-      request.send();
     }
-  });
+
+    request.open("POST",
+      "http://" + ipAddress + ":" + COMMAND_PORT + "/setPosition?position=" + position,
+      true
+    );
+    request.send();
+  }
 }
 
 function setVolume() {
-  browser.storage.local.get(["ipAddress", "maxVolume", "minVolume"]).then((storedData) => {
-    const maxVolume = parseFloat(storedData.maxVolume, 10) || 500;
-    const minVolume = parseFloat(storedData.minVolume, 10) || -4000;
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress) {
-      const volumeBar = document.getElementById("volumeBar");
-      const min = parseInt(volumeBar.min, 10);
-      const max = parseInt(volumeBar.max, 10);
-      const value = parseInt(volumeBar.value, 10);
-      const volume = Math.pow(10, ((value >= 0) ? value/max * maxVolume : value/min * minVolume) / 2000);
+  const ipAddress = localStorage.getItem("ipAddress");
+  const storedMaxVolume = localStorage.getItem("maxVolume");
+  const storedMinVolume = localStorage.getItem("minVolume");
+  const maxVolume = parseFloat(storedMaxVolume, 10) || 500;
+  const minVolume = parseFloat(storedMinVolume, 10) || -4000;
 
-      browser.storage.local.set({ volume: volume });
+  if (ipAddress) {
+    const volumeBar = document.getElementById("volumeBar");
+    const min = parseInt(volumeBar.min, 10);
+    const max = parseInt(volumeBar.max, 10);
+    const value = parseInt(volumeBar.value, 10);
+    const volume = Math.pow(10, ((value >= 0) ? value/max * maxVolume : value/min * minVolume) / 2000);
 
-      let request = new XMLHttpRequest();
-      awaitingSetVolumeResponse = true;
-      request.onreadystatechange = () => {
-        if (request.readyState == XMLHttpRequest.DONE) {
-          awaitingSetVolumeResponse = false;
+    localStorage.setItem("volume", volume);
 
-          const response = (request.responseText) ? JSON.parse(request.responseText) : null;
-          switch (request.status) {
-            case 0:
-              alertUser("Unable to reach cast server.");
-              break;
-            case 200:
-              /* TODO: maybe read returned volume and set the volume bar to it */
-              break;
-            case 400:
-              switch (response && response.status) {
-                case NEW_CASTER:
-                  alertUser("Someone else cast a video.");
-                  break;
-                case EXPIRED_CAST:
-                  alertUser("Cast expired.");
-                  break;
-                case NO_CAST:
-                  alertUser("No video is being cast.");
-                  break;
-                case CAST_LOADING:
-                  alertUser("Video loading.");
-                  break;
-                case INVALID_PARAMETERS:
-                  alertUser("Congrats, you found a bug!");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            case 500:
-              switch (response && response.status) {
-                case UNKNOWN:
-                  alertUser("Error setting volume.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            default:
-              alertUser("Unknown error. Sorry!");
-              break;
-          }
+    let request = new XMLHttpRequest();
+    awaitingSetVolumeResponse = true;
+    request.onreadystatechange = () => {
+      if (request.readyState == XMLHttpRequest.DONE) {
+        awaitingSetVolumeResponse = false;
+
+        const response = (request.responseText) ? JSON.parse(request.responseText) : null;
+        switch (request.status) {
+          case 0:
+            alertUser("Unable to reach cast server.");
+            break;
+          case 200:
+            /* TODO: maybe read returned volume and set the volume bar to it */
+            break;
+          case 400:
+            switch (response && response.status) {
+              case NEW_CASTER:
+                alertUser("Someone else cast a video.");
+                break;
+              case EXPIRED_CAST:
+                alertUser("Cast expired.");
+                break;
+              case NO_CAST:
+                alertUser("No video is being cast.");
+                break;
+              case CAST_LOADING:
+                alertUser("Video loading.");
+                break;
+              case INVALID_PARAMETERS:
+                alertUser("Congrats, you found a bug!");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          case 500:
+            switch (response && response.status) {
+              case UNKNOWN:
+                alertUser("Error setting volume.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          default:
+            alertUser("Unknown error. Sorry!");
+            break;
         }
-      };
- 
-      request.open("POST",
-        "http://" + ipAddress + ":" + COMMAND_PORT + "/setVolume?volume=" + volume,
-        true
-      );
-      request.send();
-    }
-  });
+      }
+    };
+
+    request.open("POST",
+      "http://" + ipAddress + ":" + COMMAND_PORT + "/setVolume?volume=" + volume,
+      true
+    );
+    request.send();
+  }
 }
 
 function seek(offset) {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress) {
-      let request = new XMLHttpRequest();
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (ipAddress) {
+    let request = new XMLHttpRequest();
 
-      request.open("POST",
-        "http://" + ipAddress + ":" + COMMAND_PORT + "/" + "seek?offset=" + offset,
-        true
-      );
-
-      request.onreadystatechange = () => {
-        if (request.readyState == XMLHttpRequest.DONE) {
-          const response = (request.responseText) ? JSON.parse(request.responseText) : null;
-          switch (request.status) {
-            case 0:
-              alertUser("Unable to reach cast server.");
-              break;
-            case 200:
-              break;
-            case 400:
-              switch (response && response.status) {
-                case NEW_CASTER:
-                  alertUser("Someone else cast a video.");
-                  break;
-                case EXPIRED_CAST:
-                  alertUser("Cast expired.");
-                  break;
-                case NO_CAST:
-                  alertUser("No video is being cast.");
-                  break;
-                case CAST_LOADING:
-                  alertUser("Video loading.");
-                  break;
-                case INVALID_PARAMETERS:
-                  /* TODO: check if this error message is accurate */
-                  alertUser("Unable to seek there.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            case 500:
-              switch (response && response.status) {
-                case UNKNOWN:
-                  alertUser("Error seeking video.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            default:
-              alertUser("Unknown error. Sorry!");
-              break;
-          }
+    request.open("POST",
+      "http://" + ipAddress + ":" + COMMAND_PORT + "/" + "seek?offset=" + offset,
+      true);
+    request.onreadystatechange = () => {
+      if (request.readyState == XMLHttpRequest.DONE) {
+        const response = (request.responseText) ? JSON.parse(request.responseText) : null;
+        switch (request.status) {
+          case 0:
+            alertUser("Unable to reach cast server.");
+            break;
+          case 200:
+            break;
+          case 400:
+            switch (response && response.status) {
+              case NEW_CASTER:
+                alertUser("Someone else cast a video.");
+                break;
+              case EXPIRED_CAST:
+                alertUser("Cast expired.");
+                break;
+              case NO_CAST:
+                alertUser("No video is being cast.");
+                break;
+              case CAST_LOADING:
+                alertUser("Video loading.");
+                break;
+              case INVALID_PARAMETERS:
+                /* TODO: check if this error message is accurate */
+                alertUser("Unable to seek there.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          case 500:
+            switch (response && response.status) {
+              case UNKNOWN:
+                alertUser("Error seeking video.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          default:
+            alertUser("Unknown error. Sorry!");
+            break;
         }
-      };
- 
-      request.send();
-    }
-  });
+      }
+    };
+
+    request.send();
+  }
 }
 
 function quit() {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress) {
-      let request = new XMLHttpRequest();
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (ipAddress) {
+    let request = new XMLHttpRequest();
 
-      request.open("POST",
-        "http://" + ipAddress + ":" + COMMAND_PORT + "/" + "quit",
-        true
-      );
+    request.open("POST",
+      "http://" + ipAddress + ":" + COMMAND_PORT + "/" + "quit",
+      true
+    );
 
-      
-      request.onreadystatechange = () => {
-        if (request.readyState == XMLHttpRequest.DONE) {
-          const response = (request.responseText) ? JSON.parse(request.responseText) : null;
-          switch (request.status) {
-            case 0:
-              alertUser("Unable to reach cast server.");
-              break;
-            case 200:
-              break;
-            case 400:
-              switch (response && response.status) {
-                case NEW_CASTER:
-                  alertUser("Someone else cast a video.");
-                  break;
-                case EXPIRED_CAST:
-                  alertUser("Cast expired.");
-                  break;
-                case NO_CAST:
-                  alertUser("No video is being cast.");
-                  break;
-                case CAST_LOADING:
-                  alertUser("Video loading.");
-                  break;
-                case INVALID_PARAMETERS:
-                  alertUser("Congrats, you found a bug!");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            case 500:
-              switch (response && response.status) {
-                case UNKNOWN:
-                  alertUser("Error stopping video.");
-                  break;
-                default:
-                  alertUser("Unknown error. Sorry!");
-                  break;
-              }
-              break;
-            default:
-              alertUser("Unknown error. Sorry!");
-              break;
-          }
+
+    request.onreadystatechange = () => {
+      if (request.readyState == XMLHttpRequest.DONE) {
+        const response = (request.responseText) ? JSON.parse(request.responseText) : null;
+        switch (request.status) {
+          case 0:
+            alertUser("Unable to reach cast server.");
+            break;
+          case 200:
+            break;
+          case 400:
+            switch (response && response.status) {
+              case NEW_CASTER:
+                alertUser("Someone else cast a video.");
+                break;
+              case EXPIRED_CAST:
+                alertUser("Cast expired.");
+                break;
+              case NO_CAST:
+                alertUser("No video is being cast.");
+                break;
+              case CAST_LOADING:
+                alertUser("Video loading.");
+                break;
+              case INVALID_PARAMETERS:
+                alertUser("Congrats, you found a bug!");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          case 500:
+            switch (response && response.status) {
+              case UNKNOWN:
+                alertUser("Error stopping video.");
+                break;
+              default:
+                alertUser("Unknown error. Sorry!");
+                break;
+            }
+            break;
+          default:
+            alertUser("Unknown error. Sorry!");
+            break;
         }
-      };
+      }
+    };
 
-      request.send();
-    }
-  });
+    request.send();
+  }
 }
 
 
 function sendSimpleCommand(command, callback) {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (!ipAddress) {
-      alertUser("Please enter the cast IP address.");
-      return;
-    }
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (!ipAddress) {
+    alertUser("Please enter the cast IP address.");
+    return;
+  }
 
-    let request = new XMLHttpRequest();
+  let request = new XMLHttpRequest();
 
-    request.onreadystatechange = () => {
-      if (callback)
-        callback(request);
-    };
+  request.onreadystatechange = () => {
+    if (callback)
+      callback(request);
+  };
 
-    request.open("GET",
-      "http://" + ipAddress + ":" + COMMAND_PORT + "/" + command,
-      true
-    );
+  request.open("GET",
+    "http://" + ipAddress + ":" + COMMAND_PORT + "/" + command,
+    true
+  );
 
-    request.send();
-  });
+  request.send();
 }
-
-
 
 function showNewInterface() {
   document.getElementById("interface").style.display = "block";
   document.getElementById("interfaceLegacy").style.display = "none";
   document.querySelector("body").style.width = "240px";
   document.getElementById("ipAddress").style.width = "175px";
-
 }
 
 function showLegacyInterface() {
@@ -661,55 +646,50 @@ function handleMessage(message) {
     case "position":
       if (!awaitingSetPositionResponse && !settingPosition) {
         const position = data.position;
-        browser.storage.local.get("duration").then((storedData) => {
-          const duration = storedData.duration;
-          const scrubberBar = document.getElementById("scrubberBar");
-          const min = parseInt(scrubberBar.min, 10);
-          const max = parseInt(scrubberBar.max, 10);
+        const duration = localStorage.getItem("duration");
+        const scrubberBar = document.getElementById("scrubberBar");
+        const min = parseInt(scrubberBar.min, 10);
+        const max = parseInt(scrubberBar.max, 10);
 
-          if (position < duration && !settingPosition) {
-            browser.storage.local.set({ position: position });
-            scrubberBar.value = Math.floor(position / duration * (max - min) + min);
-          }
-        });
+        if (position < duration && !settingPosition) {
+          localStorage.setItem("position", position);
+          scrubberBar.value = Math.floor(position / duration * (max - min) + min);
+        }
+        break;
       }
-
-      break;
   }
 }
 
 function storeIPAddress() {
-  browser.storage.local.set({ ipAddress: document.getElementById("ipAddress").value });
+  localStorage.setItem("ipAddress", document.getElementById("ipAddress").value);
 }
 
 function restoreIPAddress() {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress) {
-      document.getElementById("ipAddress").value = ipAddress;
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (ipAddress) {
+    document.getElementById("ipAddress").value = ipAddress;
 
-      /* Attempt to connect to new update port */
-      const connection = new WebSocket("ws://" + ipAddress + ":" + UPDATE_PORT);
-      connection.onmessage = handleMessage;
-      connection.onopen = () => {
-        browser.storage.local.set({ "interface" : "new" });
-        showNewInterface();
-      };
+    /* Attempt to connect to new update port */
+    const connection = new WebSocket("ws://" + ipAddress + ":" + UPDATE_PORT);
+    connection.onmessage = handleMessage;
+    connection.onopen = () => {
+      localStorage.setItem("interface", "new")
+      showNewInterface();
+    };
 
-      /* If unsuccessful, connect to old update port */
-      connection.onclose = (e) => {
-        if (e.code === 1006) {
-          const connectionLegacy = new WebSocket("ws://" + ipAddress + ":" + LEGACY_UPDATE_PORT);
-          connectionLegacy.onopen = () => {
-            browser.storage.local.set({ "interface" : "legacy" });
-            showLegacyInterface();
-          };
+    /* If unsuccessful, connect to old update port */
+    connection.onclose = (e) => {
+      if (e.code === 1006) {
+        const connectionLegacy = new WebSocket("ws://" + ipAddress + ":" + LEGACY_UPDATE_PORT);
+        connectionLegacy.onopen = () => {
+          localStorage.setItem("interface", "legacy")
+          showLegacyInterface();
+        };
 
-          connectionLegacy.onmessage = handleMessageLegacy;
-        }
+        connectionLegacy.onmessage = handleMessageLegacy;
       }
     }
-  });
+  }
 }
 
 function handleMessageLegacy(message) {
@@ -721,17 +701,15 @@ function handleMessageLegacy(message) {
 
 /* Legacy Support Functions */
 function setTogglePauseIconLegacy() {
-  browser.storage.local.get("ipAddress").then((storedData) => {
-    const ipAddress = storedData.ipAddress;
-    if (ipAddress)
-      sendSimpleCommand("isPlaying", (request) => {
-        if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
-          const playing = JSON.parse(request.responseText).isPlaying;
-          document.getElementById("togglePauseLegacy").src = "/icons/" + ((playing) ? "ic_pause_3x.png"
-            : "ic_play_arrow_3x.png");
-        }
-      });
-  });
+  const ipAddress = localStorage.getItem("ipAddress");
+  if (ipAddress)
+    sendSimpleCommand("isPlaying", (request) => {
+      if (request.readyState == XMLHttpRequest.DONE && request.status == 200) { 
+        const playing = JSON.parse(request.responseText).isPlaying;
+        document.getElementById("togglePauseLegacy").src = "/icons/" + ((playing) ? "ic_pause_3x.png"
+          : "ic_play_arrow_3x.png");
+      }
+    });
 }
 
 function togglePauseLegacy() {
